@@ -1,0 +1,11 @@
+menu "S-PockShower"
+    config TB_URI
+        string "URI del broker MQTT"
+        default "mqtt://mqtt.eu.thingsboard.cloud"
+    config TB_TOKEN
+        string "Token del dispositivo ThingsBoard"
+        default ""
+    config OTA_URL
+        string "URL del firmware OTA"
+        default ""
+endmenu
