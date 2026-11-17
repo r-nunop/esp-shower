@@ -1,6 +1,19 @@
 #include "sensor_nivel.h"
 #include "config.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
+
+// Antirrebote: el estado solo cambia si la lectura nueva se mantiene
+// NIVEL_ANTIRREBOTE_MS. Pensado para que el oleaje no dispare un error.
+// Solo debe llamarse desde una tarea (la FSM): no es reentrante.
+static bool estable = false;
+static bool candidato = false;
+static int64_t t_candidato_us = 0;
+
+static bool leer_crudo(void)
+{
+    return gpio_get_level(PIN_NIVEL) == NIVEL_VALOR_CON_AGUA;
+}
 
 void sensor_nivel_init(void)
 {
@@ -12,9 +25,24 @@ void sensor_nivel_init(void)
         .intr_type = GPIO_INTR_DISABLE,
     };
     gpio_config(&io);
+
+    estable = leer_crudo();
+    candidato = estable;
+    t_candidato_us = esp_timer_get_time();
 }
 
 bool sensor_nivel_ok(void)
 {
-    return gpio_get_level(PIN_NIVEL) == NIVEL_VALOR_CON_AGUA;
+    bool crudo = leer_crudo();
+    int64_t ahora = esp_timer_get_time();
+
+    if (crudo == estable) {
+        candidato = estable;
+    } else if (crudo != candidato) {
+        candidato = crudo;
+        t_candidato_us = ahora;
+    } else if ((ahora - t_candidato_us) >= (int64_t)NIVEL_ANTIRREBOTE_MS * 1000) {
+        estable = crudo;
+    }
+    return estable;
 }

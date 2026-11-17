@@ -42,6 +42,9 @@ static void ota_task(void *arg)
 
     esp_err_t r;
     while ((r = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
+        // Cede la CPU para no dejar sin tiempo a la tarea idle (watchdog)
+        // ni a las demás tareas.
+        vTaskDelay(pdMS_TO_TICKS(10));
     }
 
     if (r == ESP_OK && esp_https_ota_is_complete_data_received(handle)) {
@@ -57,12 +60,18 @@ fin:
     vTaskDelete(NULL);
 }
 
+bool ota_en_curso(void)
+{
+    return en_curso;
+}
+
 bool ota_lanzar(void)
 {
     if (en_curso) return false;
     if (fsm_estado() != EST_REPOSO) return false;
     en_curso = true;
-    if (xTaskCreate(ota_task, "ota_task", 8192, NULL, 5, NULL) != pdPASS) {
+    // Prioridad 3: menor que la FSM (5) para que la descarga nunca la retrase.
+    if (xTaskCreate(ota_task, "ota_task", 8192, NULL, 3, NULL) != pdPASS) {
         en_curso = false;
         return false;
     }
