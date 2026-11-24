@@ -23,8 +23,9 @@ typedef enum {
 typedef struct {
     float temp_c;
     bool  temp_valida;
-    int   turbidez_raw;
+    float turbidez_v;
     float turbidez_pct;
+    bool  turbidez_valida;
     bool  nivel_ok;
 } lecturas_t;
 

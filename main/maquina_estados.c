@@ -27,7 +27,10 @@ static float t_obj = TEMP_OBJETIVO_DEFECTO;
 static volatile int cadencia_ms = CADENCIA_DEFECTO_MS;
 static bool calentador_on = false;
 static bool filtro_saturado = false;
-static bool turbidez_ok = true;     // la última lectura de turbidez fue correcta
+// Última medida de turbidez: solo se mide al final de FILTRADO y se publica hasta la siguiente
+static float turbidez_v = 0.0f;
+static float turbidez_pct = 0.0f;
+static bool turbidez_valida = false;
 
 // Copia de los últimos datos para que la tarea de telemetría los publique
 // sin que la FSM tenga que tocar la red (la red puede bloquearse).
@@ -67,7 +70,9 @@ static lecturas_t leer_sensores(void)
 {
     lecturas_t l = {0};
     l.temp_valida = sensor_temp_get(&l.temp_c);
-    turbidez_ok = sensor_turbidez_leer(&l.turbidez_raw, &l.turbidez_pct);
+    l.turbidez_v = turbidez_v;
+    l.turbidez_pct = turbidez_pct;
+    l.turbidez_valida = turbidez_valida;
     l.nivel_ok = sensor_nivel_ok();
     return l;
 }
@@ -145,8 +150,9 @@ static void ejecutar_estado(const lecturas_t *l)
 
     case EST_FILTRADO:
         if (en_estado_ms() > FILTRADO_MS) {
-            if (turbidez_ok) {
-                filtro_saturado = l->turbidez_pct > UMBRAL_TURBIDEZ_PCT;
+            if (sensor_turbidez_leer(&turbidez_v, &turbidez_pct)) {
+                turbidez_valida = true;
+                filtro_saturado = turbidez_pct > UMBRAL_TURBIDEZ_PCT;
                 if (filtro_saturado) avisos_lanzar(AVISO_FILTRO_SATURADO);
             } else {
                 ESP_LOGW(TAG, "Turbidez no disponible: se mantiene el ultimo veredicto");
@@ -214,6 +220,7 @@ static void fsm_task(void *arg)
 
         ejecutar_estado(&l);
         aplicar_actuadores();
+        sensor_turbidez_encender(estado == EST_FILTRADO);
         if (!actuadores_ok() && estado != EST_ERROR) ir_a(EST_ERROR, ERR_ACTUADORES);
 
         pantalla_actualizar(estado, &l, t_obj, error_actual);
