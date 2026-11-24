@@ -13,7 +13,8 @@
 #define CANAL_TURBIDEZ        ADC_CHANNEL_6
 #define PIN_NIVEL             GPIO_NUM_35
 #define NIVEL_VALOR_CON_AGUA  1
-#define NIVEL_ANTIRREBOTE_MS  500 
+// Para que el oleaje del agua no dispare un error de nivel
+#define NIVEL_ANTIRREBOTE_MS  500
 
 #define PIN_I2C_SDA           GPIO_NUM_21
 #define PIN_I2C_SCL           GPIO_NUM_22
@@ -26,6 +27,7 @@
 #define TEMP_SEGURIDAD_C      55.0f
 #define HISTERESIS_C          1.0f
 
+// Hay que calibrarlo con el sensor real: con agua limpia da más tensión
 #define TURBIDEZ_RAW_LIMPIA   3200
 #define TURBIDEZ_RAW_TURBIA   2000
 #define TURBIDEZ_MUESTRAS     16
