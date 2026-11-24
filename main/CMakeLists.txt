@@ -9,6 +9,7 @@ idf_component_register(
         "sensor_nivel.c"
         "actuadores.c"
         "bus_i2c.c"
+        "mcp23017.c"
         "pantalla.c"
         "avisos.c"
         "seguridad.c"
