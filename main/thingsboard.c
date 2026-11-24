@@ -2,6 +2,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "esp_log.h"
+#include "esp_app_desc.h"
 #include "mqtt_client.h"
 #include "cJSON.h"
 #include "thingsboard.h"
@@ -20,6 +21,16 @@ static void responder(const char *req_id, const char *json)
     char topic[64];
     snprintf(topic, sizeof(topic), "v1/devices/me/rpc/response/%s", req_id);
     esp_mqtt_client_publish(cliente, topic, json, 0, 1, 0);
+}
+
+// Atributos que lee el panel de OTA de ThingsBoard
+static void enviar_version(void)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    char json[128];
+    snprintf(json, sizeof(json), "{\"current_fw_title\":\"%s\",\"current_fw_version\":\"%s\"}",
+             app->project_name, app->version);
+    tb_publicar_atributos(json);
 }
 
 static void procesar_rpc(const char *req_id, const char *data, int data_len)
@@ -70,6 +81,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI(TAG, "Conectado");
         conectado = true;
         esp_mqtt_client_subscribe(event->client, PREFIJO_RPC "+", 0);
+        enviar_version();
         break;
     case MQTT_EVENT_DISCONNECTED:
         conectado = false;
@@ -108,6 +120,12 @@ void tb_iniciar(void)
 bool tb_conectado(void)
 {
     return conectado;
+}
+
+void tb_publicar_atributos(const char *json)
+{
+    if (cliente == NULL || !conectado) return;
+    esp_mqtt_client_publish(cliente, "v1/devices/me/attributes", json, 0, 1, 0);
 }
 
 void tb_publicar(const lecturas_t *l, estado_t e, codigo_error_t err, float t_obj, bool filtro_saturado)

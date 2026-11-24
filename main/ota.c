@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "ota.h"
 #include "maquina_estados.h"
+#include "thingsboard.h"
 
 static const char *TAG = "OTA";
 static volatile bool en_curso = false;
@@ -43,6 +44,15 @@ static bool ya_fallo(const char *version)
            strcmp(desc.version, version) == 0;
 }
 
+// fw_state y fw_error son los atributos que muestra el panel de OTA de ThingsBoard
+static void enviar_estado(const char *estado, const char *error)
+{
+    char json[128];
+    if (error) snprintf(json, sizeof(json), "{\"fw_state\":\"%s\",\"fw_error\":\"%s\"}", estado, error);
+    else snprintf(json, sizeof(json), "{\"fw_state\":\"%s\"}", estado);
+    tb_publicar_atributos(json);
+}
+
 static void ota_task(void *arg)
 {
     if (strlen(CONFIG_OTA_URL) == 0) {
@@ -60,6 +70,7 @@ static void ota_task(void *arg)
 
     if (esp_https_ota_begin(&ota_cfg, &handle) != ESP_OK) {
         ESP_LOGE(TAG, "No se pudo iniciar la OTA");
+        enviar_estado("FAILED", "No se pudo conectar con la URL del firmware");
         goto fin;
     }
 
@@ -67,6 +78,7 @@ static void ota_task(void *arg)
     const esp_app_desc_t *actual = esp_app_get_description();
     if (esp_https_ota_get_img_desc(handle, &nueva) != ESP_OK) {
         esp_https_ota_abort(handle);
+        enviar_estado("FAILED", "No se pudo leer la cabecera del firmware");
         goto fin;
     }
 
@@ -76,6 +88,7 @@ static void ota_task(void *arg)
         goto fin;
     }
 
+    enviar_estado("DOWNLOADING", NULL);
     esp_err_t r;
     while ((r = esp_https_ota_perform(handle)) == ESP_ERR_HTTPS_OTA_IN_PROGRESS) {
         // Cede la CPU para no dejar sin tiempo a la tarea idle (watchdog)
@@ -85,15 +98,24 @@ static void ota_task(void *arg)
 
     if (r != ESP_OK || !esp_https_ota_is_complete_data_received(handle)) {
         esp_https_ota_abort(handle);
+        enviar_estado("FAILED", "Descarga incompleta");
         goto fin;
     }
-    if (esp_https_ota_finish(handle) != ESP_OK) goto fin;
+    enviar_estado("DOWNLOADED", NULL);
+    if (esp_https_ota_finish(handle) != ESP_OK) {
+        enviar_estado("FAILED", "Imagen no valida");
+        goto fin;
+    }
+    enviar_estado("VERIFIED", NULL);
 
     // en_curso sigue a true hasta el reinicio, así no puede empezar una ducha
     while (fsm_estado() != EST_REPOSO && fsm_estado() != EST_ERROR) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     ESP_LOGI(TAG, "Version %s instalada, reiniciando", nueva.version);
+    enviar_estado("UPDATING", NULL);
+    // Margen para que el mensaje salga antes de cortar la Wi-Fi
+    vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 
 fin:
