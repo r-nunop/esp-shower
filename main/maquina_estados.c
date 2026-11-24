@@ -217,8 +217,8 @@ static void fsm_task(void *arg)
     // vuelven a OFF (ver CONFIG_ESP_TASK_WDT_PANIC en sdkconfig.defaults).
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_task_wdt_add(NULL));
 
-    TickType_t t = xTaskGetTickCount();
     for (;;) {
+        TickType_t inicio = xTaskGetTickCount();
         estado_t anterior = estado;
         lecturas_t l = leer_sensores();
 
@@ -240,7 +240,10 @@ static void fsm_task(void *arg)
         if (estado != anterior) avisar_telemetria();
         esp_task_wdt_reset();
 
-        vTaskDelayUntil(&t, pdMS_TO_TICKS(PERIODO_FSM_MS));
+        int periodo_ms = estado == EST_REPOSO ? PERIODO_REPOSO_MS : PERIODO_FSM_MS;
+        TickType_t pasado = xTaskGetTickCount() - inicio;
+        TickType_t periodo = pdMS_TO_TICKS(periodo_ms);
+        if (pasado < periodo) xQueuePeek(cola_cmd, &c, periodo - pasado);
     }
 }
 
