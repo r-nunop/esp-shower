@@ -3,9 +3,6 @@
 #include "driver/gpio.h"
 #include "esp_timer.h"
 
-// Antirrebote: el estado solo cambia si la lectura nueva se mantiene
-// NIVEL_ANTIRREBOTE_MS. Pensado para que el oleaje no dispare un error.
-// Solo debe llamarse desde una tarea (la FSM): no es reentrante.
 static bool estable = false;
 static bool candidato = false;
 static int64_t t_candidato_us = 0;

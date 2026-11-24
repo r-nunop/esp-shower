@@ -3,8 +3,7 @@
 
 #include <stdbool.h>
 
-void init_sensor_nivel(void);
-
-bool hay_agua(void);
+void sensor_nivel_init(void);
+bool sensor_nivel_ok(void);
 
 #endif
