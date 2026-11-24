@@ -21,7 +21,12 @@ static volatile bool en_curso = false;
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 #define PLAZO_VALIDAR_MS  (5 * 60 * 1000)
+#define URL_MAX           256
 #define TZ_MADRID         "CET-1CEST,M3.5.0,M10.5.0/3"
+
+static char url_ota[URL_MAX];
+static char url_asignada[URL_MAX];
+static bool asignada = false;
 
 static bool leer_version(const char *v, int n[3])
 {
@@ -87,13 +92,14 @@ static void borrar_instalada(void)
 
 static void ota_task(void *arg)
 {
-    if (strlen(CONFIG_OTA_URL) == 0) {
-        ESP_LOGW(TAG, "CONFIG_OTA_URL vacia: OTA desactivada");
+    if (strlen(url_ota) == 0) {
+        ESP_LOGW(TAG, "Sin URL de firmware: OTA desactivada");
         goto fin;
     }
+    ESP_LOGI(TAG, "Comprobando %s", url_ota);
 
     esp_http_client_config_t http_cfg = {
-        .url = CONFIG_OTA_URL,
+        .url = url_ota,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .keep_alive_enable = true,
         .buffer_size_tx = 2048,
@@ -160,7 +166,7 @@ bool ota_en_curso(void)
     return en_curso;
 }
 
-bool ota_lanzar(void)
+static bool lanzar(const char *url)
 {
     if (fsm_estado() != EST_REPOSO) return false;
 
@@ -170,12 +176,46 @@ bool ota_lanzar(void)
     portEXIT_CRITICAL(&mux);
     if (!libre) return false;
 
+    snprintf(url_ota, sizeof(url_ota), "%s", url);
+
     // Prioridad 3: menor que la FSM (5) para que la descarga nunca la retrase.
     if (xTaskCreate(ota_task, "ota_task", 8192, NULL, 3, NULL) != pdPASS) {
         en_curso = false;
         return false;
     }
     return true;
+}
+
+bool ota_lanzar(void)
+{
+    return lanzar(CONFIG_OTA_URL);
+}
+
+void ota_asignar(const char *titulo, const char *version, const char *url)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    if (version == NULL) return;
+    if (titulo != NULL && strcmp(titulo, app->project_name) != 0) {
+        ESP_LOGW(TAG, "Firmware asignado para otro proyecto: %s", titulo);
+        return;
+    }
+    if (!es_mas_nueva(version, app->version)) return;
+
+    bool hay_url = url != NULL && url[0] != '\0';
+    if (hay_url && strncmp(url, "https://", 8) != 0) {
+        ESP_LOGW(TAG, "fw_url ignorada, no es https: %s", url);
+        return;
+    }
+    const char *u = hay_url ? url : CONFIG_OTA_URL;
+    if (strlen(u) >= URL_MAX) {
+        ESP_LOGE(TAG, "URL del firmware demasiado larga");
+        return;
+    }
+    ESP_LOGI(TAG, "ThingsBoard asigna la version %s", version);
+    portENTER_CRITICAL(&mux);
+    strcpy(url_asignada, u);
+    asignada = true;
+    portEXIT_CRITICAL(&mux);
 }
 
 static int64_t ahora_ms(void)
@@ -248,6 +288,19 @@ static void planificador_task(void *arg)
         }
 
         bool se_puede = tb_conectado() && fsm_estado() == EST_REPOSO;
+        if (se_puede) {
+            char url[URL_MAX];
+            portENTER_CRITICAL(&mux);
+            bool hay = asignada;
+            if (hay) strcpy(url, url_asignada);
+            portEXIT_CRITICAL(&mux);
+            if (hay && lanzar(url)) {
+                portENTER_CRITICAL(&mux);
+                asignada = false;
+                portEXIT_CRITICAL(&mux);
+            }
+        }
+
         if (!comprobada_al_arrancar && se_puede && ota_lanzar()) {
             ESP_LOGI(TAG, "Comprobacion al arrancar");
             comprobada_al_arrancar = true;

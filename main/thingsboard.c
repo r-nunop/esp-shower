@@ -7,9 +7,14 @@
 #include "cJSON.h"
 #include "thingsboard.h"
 #include "config.h"
+#include "ota.h"
 
 #define PREFIJO_RPC      "v1/devices/me/rpc/request/"
 #define PREFIJO_RPC_LEN  (sizeof(PREFIJO_RPC) - 1)
+#define TOPIC_ATRIB      "v1/devices/me/attributes"
+#define PREFIJO_RESP     "v1/devices/me/attributes/response/"
+#define PREFIJO_RESP_LEN (sizeof(PREFIJO_RESP) - 1)
+#define PREFIJO_RESP_PET "v1/devices/me/attributes/request/"
 
 static const char *TAG = "TB";
 static esp_mqtt_client_handle_t cliente = NULL;
@@ -30,6 +35,24 @@ static void enviar_version(void)
     snprintf(json, sizeof(json), "{\"current_fw_title\":\"%s\",\"current_fw_version\":\"%s\"}",
              app->project_name, app->version);
     tb_publicar_atributos(json);
+}
+
+static const char *texto(const cJSON *obj, const char *clave)
+{
+    const cJSON *item = cJSON_GetObjectItem(obj, clave);
+    return cJSON_IsString(item) ? item->valuestring : NULL;
+}
+
+static void procesar_atributos(const char *data, int data_len, bool respuesta)
+{
+    cJSON *json = cJSON_ParseWithLength(data, data_len);
+    if (json == NULL) return;
+    const cJSON *compartidos = respuesta ? cJSON_GetObjectItem(json, "shared") : json;
+    if (cJSON_IsObject(compartidos)) {
+        ota_asignar(texto(compartidos, "fw_title"), texto(compartidos, "fw_version"),
+                    texto(compartidos, "fw_url"));
+    }
+    cJSON_Delete(json);
 }
 
 static void procesar_rpc(const char *req_id, const char *data, int data_len)
@@ -80,14 +103,24 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         ESP_LOGI(TAG, "Conectado");
         conectado = true;
         esp_mqtt_client_subscribe(event->client, PREFIJO_RPC "+", 0);
+        esp_mqtt_client_subscribe(event->client, TOPIC_ATRIB, 1);
+        esp_mqtt_client_subscribe(event->client, PREFIJO_RESP "+", 1);
         enviar_version();
+        esp_mqtt_client_publish(event->client, PREFIJO_RESP_PET "1",
+                                "{\"sharedKeys\":\"fw_title,fw_version,fw_url\"}", 0, 1, 0);
         break;
     case MQTT_EVENT_DISCONNECTED:
         conectado = false;
         break;
     case MQTT_EVENT_DATA:
-        if (event->topic != NULL &&
-            event->topic_len > (int)PREFIJO_RPC_LEN &&
+        if (event->topic == NULL || event->data_len != event->total_data_len) break;
+        if (event->topic_len == (int)strlen(TOPIC_ATRIB) &&
+            strncmp(event->topic, TOPIC_ATRIB, event->topic_len) == 0) {
+            procesar_atributos(event->data, event->data_len, false);
+        } else if (event->topic_len > (int)PREFIJO_RESP_LEN &&
+                   strncmp(event->topic, PREFIJO_RESP, PREFIJO_RESP_LEN) == 0) {
+            procesar_atributos(event->data, event->data_len, true);
+        } else if (event->topic_len > (int)PREFIJO_RPC_LEN &&
             strncmp(event->topic, PREFIJO_RPC, PREFIJO_RPC_LEN) == 0) {
             char req_id[20];
             snprintf(req_id, sizeof(req_id), "%.*s", (int)(event->topic_len - PREFIJO_RPC_LEN), event->topic + PREFIJO_RPC_LEN);
