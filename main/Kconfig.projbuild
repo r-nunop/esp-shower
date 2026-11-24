@@ -12,4 +12,8 @@ menu "S-PockShower"
         int "Hora de la comprobacion diaria de OTA (hora de Madrid)"
         range 0 23
         default 3
+    config SHOWER_LIGHT_SLEEP
+        bool "Light sleep automatico en REPOSO"
+        depends on PM_ENABLE && FREERTOS_USE_TICKLESS_IDLE
+        default y
 endmenu

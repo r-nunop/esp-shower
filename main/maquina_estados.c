@@ -16,6 +16,7 @@
 #include "seguridad.h"
 #include "thingsboard.h"
 #include "ota.h"
+#include "energia.h"
 
 static const char *TAG = "FSM";
 
@@ -238,6 +239,7 @@ static void fsm_task(void *arg)
 
         guardar_instantanea(&l);
         if (estado != anterior) avisar_telemetria();
+        energia_modo_reposo(estado == EST_REPOSO);
         esp_task_wdt_reset();
 
         int periodo_ms = estado == EST_REPOSO ? PERIODO_REPOSO_MS : PERIODO_FSM_MS;
