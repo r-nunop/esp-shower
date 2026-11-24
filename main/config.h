@@ -38,8 +38,10 @@
 #define UMBRAL_TURBIDEZ_PCT   60.0f
 
 #define PERIODO_FSM_MS        100
+#define PERIODO_REPOSO_MS     1000
 #define CADENCIA_DEFECTO_MS   1000
 #define CADENCIA_MAX_S        3600.0f
+#define CADENCIA_REPOSO_MS    (60 * 1000)
 #define TIMEOUT_LLENADO_MS    (120 * 1000)
 // Con 120 W se tarda unos 15 min por litro
 #define TIMEOUT_PRECALENT_MS  (25 * 60 * 1000)

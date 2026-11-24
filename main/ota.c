@@ -8,6 +8,7 @@
 #include "esp_crt_bundle.h"
 #include "esp_system.h"
 #include "esp_timer.h"
+#include "esp_pm.h"
 #include "esp_netif.h"
 #include "nvs.h"
 #include "freertos/FreeRTOS.h"
@@ -27,6 +28,7 @@ static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 static char url_ota[URL_MAX];
 static char url_asignada[URL_MAX];
 static bool asignada = false;
+static esp_pm_lock_handle_t sin_light_sleep = NULL;
 
 static bool leer_version(const char *v, int n[3])
 {
@@ -92,6 +94,8 @@ static void borrar_instalada(void)
 
 static void ota_task(void *arg)
 {
+    if (sin_light_sleep != NULL) esp_pm_lock_acquire(sin_light_sleep);
+
     if (strlen(url_ota) == 0) {
         ESP_LOGW(TAG, "Sin URL de firmware: OTA desactivada");
         goto fin;
@@ -154,9 +158,11 @@ static void ota_task(void *arg)
     guardar_instalada(nueva.version);
     enviar_estado("UPDATING", NULL);
     vTaskDelay(pdMS_TO_TICKS(500));
+    if (sin_light_sleep != NULL) esp_pm_lock_release(sin_light_sleep);
     esp_restart();
 
 fin:
+    if (sin_light_sleep != NULL) esp_pm_lock_release(sin_light_sleep);
     en_curso = false;
     vTaskDelete(NULL);
 }
@@ -321,6 +327,7 @@ void ota_init(void)
 {
     setenv("TZ", TZ_MADRID, 1);
     tzset();
+    esp_pm_lock_create(ESP_PM_NO_LIGHT_SLEEP, 0, "ota", &sin_light_sleep);
     if (xTaskCreate(planificador_task, "ota_planif", 4096, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "No se pudo crear ota_planif");
     }
