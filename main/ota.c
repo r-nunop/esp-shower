@@ -5,6 +5,9 @@
 #include "esp_ota_ops.h"
 #include "esp_crt_bundle.h"
 #include "esp_system.h"
+#include "esp_timer.h"
+#include "esp_netif.h"
+#include "nvs.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "ota.h"
@@ -15,7 +18,8 @@ static const char *TAG = "OTA";
 static volatile bool en_curso = false;
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
-// Formato X.Y.Z. Cualquier otra cosa (por ejemplo "1.0.0-dirty") no se acepta
+#define PLAZO_VALIDAR_MS  (5 * 60 * 1000)
+
 static bool leer_version(const char *v, int n[3])
 {
     char resto;
@@ -35,7 +39,6 @@ static bool es_mas_nueva(const char *nueva, const char *actual)
     return false;
 }
 
-// Si esta versión ya volvió atrás una vez, no se reinstala: si no, entraría en bucle
 static bool ya_fallo(const char *version)
 {
     const esp_partition_t *p = esp_ota_get_last_invalid_partition();
@@ -44,13 +47,39 @@ static bool ya_fallo(const char *version)
            strcmp(desc.version, version) == 0;
 }
 
-// fw_state y fw_error son los atributos que muestra el panel de OTA de ThingsBoard
 static void enviar_estado(const char *estado, const char *error)
 {
     char json[128];
     if (error) snprintf(json, sizeof(json), "{\"fw_state\":\"%s\",\"fw_error\":\"%s\"}", estado, error);
     else snprintf(json, sizeof(json), "{\"fw_state\":\"%s\"}", estado);
     tb_publicar_atributos(json);
+}
+
+static void guardar_instalada(const char *version)
+{
+    nvs_handle_t h;
+    if (nvs_open("ota", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_set_str(h, "instalada", version);
+    nvs_commit(h);
+    nvs_close(h);
+}
+
+static bool leer_instalada(char *version, size_t len)
+{
+    nvs_handle_t h;
+    if (nvs_open("ota", NVS_READONLY, &h) != ESP_OK) return false;
+    bool ok = nvs_get_str(h, "instalada", version, &len) == ESP_OK;
+    nvs_close(h);
+    return ok;
+}
+
+static void borrar_instalada(void)
+{
+    nvs_handle_t h;
+    if (nvs_open("ota", NVS_READWRITE, &h) != ESP_OK) return;
+    nvs_erase_key(h, "instalada");
+    nvs_commit(h);
+    nvs_close(h);
 }
 
 static void ota_task(void *arg)
@@ -108,13 +137,12 @@ static void ota_task(void *arg)
     }
     enviar_estado("VERIFIED", NULL);
 
-    // en_curso sigue a true hasta el reinicio, así no puede empezar una ducha
     while (fsm_estado() != EST_REPOSO && fsm_estado() != EST_ERROR) {
         vTaskDelay(pdMS_TO_TICKS(1000));
     }
     ESP_LOGI(TAG, "Version %s instalada, reiniciando", nueva.version);
+    guardar_instalada(nueva.version);
     enviar_estado("UPDATING", NULL);
-    // Margen para que el mensaje salga antes de cortar la Wi-Fi
     vTaskDelay(pdMS_TO_TICKS(500));
     esp_restart();
 
@@ -132,7 +160,6 @@ bool ota_lanzar(void)
 {
     if (fsm_estado() != EST_REPOSO) return false;
 
-    // Pueden pedirla dos tareas a la vez: comprobar y marcar de una vez
     portENTER_CRITICAL(&mux);
     bool libre = !en_curso;
     if (libre) en_curso = true;
@@ -145,4 +172,75 @@ bool ota_lanzar(void)
         return false;
     }
     return true;
+}
+
+static int64_t ahora_ms(void)
+{
+    return esp_timer_get_time() / 1000;
+}
+
+static bool wifi_con_ip(void)
+{
+    esp_netif_t *netif = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+    esp_netif_ip_info_t ip;
+    return netif != NULL && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0;
+}
+
+static void planificador_task(void *arg)
+{
+    const esp_app_desc_t *app = esp_app_get_description();
+    esp_ota_img_states_t st;
+    bool por_validar = esp_ota_get_state_partition(esp_ota_get_running_partition(), &st) == ESP_OK &&
+                       st == ESP_OTA_IMG_PENDING_VERIFY;
+    char instalada[32];
+    bool avisar = leer_instalada(instalada, sizeof(instalada));
+    int64_t wifi_desde = -1;
+    int64_t sin_wifi_desde = -1;
+
+    for (;;) {
+        int64_t t = ahora_ms();
+        bool hay_wifi = wifi_con_ip();
+        if (hay_wifi) {
+            sin_wifi_desde = -1;
+            if (wifi_desde < 0) wifi_desde = t;
+        } else {
+            wifi_desde = -1;
+            if (sin_wifi_desde < 0) sin_wifi_desde = t;
+        }
+
+        if (por_validar) {
+            bool validar = tb_conectado() || (!hay_wifi && t - sin_wifi_desde >= PLAZO_VALIDAR_MS);
+            bool volver = hay_wifi && t - wifi_desde >= PLAZO_VALIDAR_MS && !tb_conectado();
+            if (validar) {
+                ESP_LOGI(TAG, "Version %s validada", app->version);
+                esp_ota_mark_app_valid_cancel_rollback();
+                por_validar = false;
+            } else if (volver && (fsm_estado() == EST_REPOSO || fsm_estado() == EST_ERROR)) {
+                ESP_LOGE(TAG, "Sin ThingsBoard tras 5 min con Wi-Fi: vuelta atras");
+                esp_ota_mark_app_invalid_rollback_and_reboot();
+                por_validar = false;
+            }
+        }
+
+        if (avisar && !por_validar && tb_conectado()) {
+            if (strcmp(instalada, app->version) == 0) {
+                enviar_estado("UPDATED", NULL);
+            } else {
+                char error[64];
+                snprintf(error, sizeof(error), "Vuelta atras: la version %s no arranco bien", instalada);
+                enviar_estado("FAILED", error);
+            }
+            borrar_instalada();
+            avisar = false;
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+}
+
+void ota_init(void)
+{
+    if (xTaskCreate(planificador_task, "ota_planif", 4096, NULL, 2, NULL) != pdPASS) {
+        ESP_LOGE(TAG, "No se pudo crear ota_planif");
+    }
 }

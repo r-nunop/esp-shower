@@ -23,7 +23,6 @@ static void responder(const char *req_id, const char *json)
     esp_mqtt_client_publish(cliente, topic, json, 0, 1, 0);
 }
 
-// Atributos que lee el panel de OTA de ThingsBoard
 static void enviar_version(void)
 {
     const esp_app_desc_t *app = esp_app_get_description();

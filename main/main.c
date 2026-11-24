@@ -9,6 +9,7 @@
 #include "maquina_estados.h"
 #include "thingsboard.h"
 #include "wifi_manager.h"
+#include "ota.h"
 
 static void nvs_init(void)
 {
@@ -33,5 +34,6 @@ void app_main(void)
 
     tb_init(fsm_enviar_comando);
     fsm_init();
+    ota_init();
     wifi_manager_init(tb_iniciar);
 }
