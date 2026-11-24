@@ -1,35 +1,71 @@
 #include "actuadores.h"
 #include "config.h"
+#include "bus_i2c.h"
+#include "mcp23017.h"
 #include "driver/gpio.h"
+#include "esp_log.h"
 
-#define NIVEL_ON   (RELE_NIVEL_ACTIVO)
-#define NIVEL_OFF  (!RELE_NIVEL_ACTIVO)
+static const char *TAG = "ACTUADORES";
 
-static void rele(gpio_num_t pin, bool on)
+// Los 4 relés de la extensión (GPA0-GPA3) como salidas, también los que no se usan
+#define MASCARA_RELES   0x0F
+#define OLAT_APAGADO    (RELE_EXT_NIVEL_ON ? 0x00 : MASCARA_RELES)
+
+static uint8_t olat = OLAT_APAGADO;
+static bool fallo = true;
+
+static void cortar_extension(void)
 {
-    gpio_set_level(pin, on ? NIVEL_ON : NIVEL_OFF);
+    bus_i2c_cortar_extension();
+    fallo = true;
+    ESP_LOGE(TAG, "Fallo en el MCP23017: extensión sin alimentación");
+}
+
+static void rele_ext(int n, bool on)
+{
+    if (fallo) return;
+
+    bool nivel = on ? RELE_EXT_NIVEL_ON : !RELE_EXT_NIVEL_ON;
+    uint8_t nuevo = nivel ? (olat | (1 << n)) : (olat & ~(1 << n));
+    if (nuevo == olat) return;
+
+    // Un reintento por si ha sido ruido puntual en el bus
+    if (mcp23017_escribir_a(nuevo) == ESP_OK || mcp23017_escribir_a(nuevo) == ESP_OK) olat = nuevo;
+    else cortar_extension();
 }
 
 void actuadores_init(void)
 {
-    const gpio_num_t pines[] = { PIN_RELE_BOMBA, PIN_RELE_VALVULA, PIN_RELE_CALENTADOR, PIN_RELE_LIBRE };
-    for (int i = 0; i < 4; i++) {
-        gpio_set_level(pines[i], NIVEL_OFF);
-        gpio_config_t io = {
-            .pin_bit_mask = 1ULL << pines[i],
-            .mode = GPIO_MODE_OUTPUT,
-            .pull_up_en = GPIO_PULLUP_DISABLE,
-            .pull_down_en = GPIO_PULLDOWN_DISABLE,
-            .intr_type = GPIO_INTR_DISABLE,
-        };
-        gpio_config(&io);
-        gpio_set_level(pines[i], NIVEL_OFF);
+    gpio_set_level(PIN_RELE_BOMBA, !BOMBA_NIVEL_ON);
+    gpio_config_t io = {
+        .pin_bit_mask = 1ULL << PIN_RELE_BOMBA,
+        .mode = GPIO_MODE_OUTPUT,
+        .pull_up_en = GPIO_PULLUP_DISABLE,
+        .pull_down_en = GPIO_PULLDOWN_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,
+    };
+    gpio_config(&io);
+    gpio_set_level(PIN_RELE_BOMBA, !BOMBA_NIVEL_ON);
+
+    if (bus_i2c_init() == ESP_OK && mcp23017_init(OLAT_APAGADO, MASCARA_RELES) == ESP_OK) {
+        fallo = false;
+    } else {
+        cortar_extension();
     }
 }
 
-void actuadores_bomba(bool on)             { rele(PIN_RELE_BOMBA, on); }
-void actuadores_valvula_ducha(bool ducha)  { rele(PIN_RELE_VALVULA, ducha); }
-void actuadores_calentador(bool on)        { rele(PIN_RELE_CALENTADOR, on); }
+bool actuadores_ok(void)
+{
+    return !fallo;
+}
+
+void actuadores_bomba(bool on)
+{
+    gpio_set_level(PIN_RELE_BOMBA, on ? BOMBA_NIVEL_ON : !BOMBA_NIVEL_ON);
+}
+
+void actuadores_valvula_ducha(bool ducha)  { rele_ext(MCP_RELE_VALVULA, ducha); }
+void actuadores_calentador(bool on)        { rele_ext(MCP_RELE_CALENTADOR, on); }
 
 void actuadores_todo_off(void)
 {

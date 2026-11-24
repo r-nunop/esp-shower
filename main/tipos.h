@@ -16,7 +16,8 @@ typedef enum {
     ERR_TIMEOUT_PRECALENT,
     ERR_NIVEL_BAJO,
     ERR_SOBRETEMP,
-    ERR_SENSOR_TEMP
+    ERR_SENSOR_TEMP,
+    ERR_ACTUADORES
 } codigo_error_t;
 
 typedef struct {
