@@ -20,6 +20,7 @@
 static const char *TAG = "FSM";
 
 static QueueHandle_t cola_cmd = NULL;
+static TaskHandle_t tarea_telemetria = NULL;
 static volatile estado_t estado = EST_REPOSO;
 static codigo_error_t error_actual = ERR_NINGUNO;
 static int64_t t_entrada_ms = 0;
@@ -45,6 +46,11 @@ typedef struct {
 static portMUX_TYPE mux_inst = portMUX_INITIALIZER_UNLOCKED;
 static instantanea_t inst;
 static bool inst_valida = false;
+
+static void avisar_telemetria(void)
+{
+    if (tarea_telemetria != NULL) xTaskNotifyGive(tarea_telemetria);
+}
 
 static int64_t ahora_ms(void)
 {
@@ -96,7 +102,10 @@ static void procesar_comando(const comando_t *c, const lecturas_t *l)
         if (estado == EST_ERROR) ir_a(EST_REPOSO, ERR_NINGUNO);
         break;
     case CMD_SET_CADENCIA:
-        if (c->valor >= 1.0f && c->valor <= CADENCIA_MAX_S) cadencia_ms = (int)(c->valor * 1000.0f);
+        if (c->valor >= 1.0f && c->valor <= CADENCIA_MAX_S) {
+            cadencia_ms = (int)(c->valor * 1000.0f);
+            avisar_telemetria();
+        }
         break;
     case CMD_OTA:
         ota_lanzar();
@@ -210,6 +219,7 @@ static void fsm_task(void *arg)
 
     TickType_t t = xTaskGetTickCount();
     for (;;) {
+        estado_t anterior = estado;
         lecturas_t l = leer_sensores();
 
         comando_t c;
@@ -227,6 +237,7 @@ static void fsm_task(void *arg)
         avisos_update();
 
         guardar_instantanea(&l);
+        if (estado != anterior) avisar_telemetria();
         esp_task_wdt_reset();
 
         vTaskDelayUntil(&t, pdMS_TO_TICKS(PERIODO_FSM_MS));
@@ -235,21 +246,20 @@ static void fsm_task(void *arg)
 
 static void telemetria_task(void *arg)
 {
-    int64_t t_ultima = 0;
     for (;;) {
-        if (ahora_ms() - t_ultima >= cadencia_ms) {
-            t_ultima = ahora_ms();
+        instantanea_t s;
+        bool valida;
+        portENTER_CRITICAL(&mux_inst);
+        s = inst;
+        valida = inst_valida;
+        portEXIT_CRITICAL(&mux_inst);
 
-            instantanea_t s;
-            bool valida;
-            portENTER_CRITICAL(&mux_inst);
-            s = inst;
-            valida = inst_valida;
-            portEXIT_CRITICAL(&mux_inst);
+        bool enviada = valida && tb_conectado();
+        if (enviada) tb_publicar(&s.l, s.estado, s.error, s.t_obj, s.filtro_saturado);
 
-            if (valida) tb_publicar(&s.l, s.estado, s.error, s.t_obj, s.filtro_saturado);
-        }
-        vTaskDelay(pdMS_TO_TICKS(100));
+        bool lenta = s.estado == EST_REPOSO || s.estado == EST_ERROR;
+        int espera_ms = !enviada ? 1000 : (lenta ? CADENCIA_REPOSO_MS : cadencia_ms);
+        ulTaskNotifyTake(pdTRUE, pdMS_TO_TICKS(espera_ms));
     }
 }
 
@@ -260,7 +270,7 @@ void fsm_init(void)
     if (xTaskCreate(fsm_task, "fsm_task", 6144, NULL, 5, NULL) != pdPASS) {
         ESP_LOGE(TAG, "No se pudo crear fsm_task");
     }
-    if (xTaskCreate(telemetria_task, "telemetria", 4096, NULL, 3, NULL) != pdPASS) {
+    if (xTaskCreate(telemetria_task, "telemetria", 4096, NULL, 3, &tarea_telemetria) != pdPASS) {
         ESP_LOGE(TAG, "No se pudo crear telemetria_task");
     }
 }
