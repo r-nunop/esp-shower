@@ -116,7 +116,10 @@ void tb_publicar(const lecturas_t *l, estado_t e, codigo_error_t err, float t_ob
 
     cJSON *root = cJSON_CreateObject();
     if (l->temp_valida) cJSON_AddNumberToObject(root, "temp", l->temp_c);
-    cJSON_AddNumberToObject(root, "turbidez", l->turbidez_pct);
+    if (l->turbidez_valida) {
+        cJSON_AddNumberToObject(root, "turbidez", l->turbidez_pct);
+        cJSON_AddNumberToObject(root, "turbidez_v", l->turbidez_v);
+    }
     cJSON_AddBoolToObject(root, "nivel_ok", l->nivel_ok);
     cJSON_AddNumberToObject(root, "estado", e);
     cJSON_AddNumberToObject(root, "error", err);

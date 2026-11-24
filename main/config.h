@@ -1,6 +1,5 @@
 #pragma once
 #include "driver/gpio.h"
-#include "esp_adc/adc_oneshot.h"
 
 // Eduponics Mini
 #define PIN_RELE_BOMBA        GPIO_NUM_23
@@ -16,9 +15,10 @@
 #define MCP_RELE_CALENTADOR   1     // relé 2 (GPA1), activa el IN del módulo de 30 A
 // Sin comprobar: probarlo con la placa antes de conectar el calentador
 #define RELE_EXT_NIVEL_ON     1
+// Sin comprobar: STEMinds enciende los MOSFET de los sensores con nivel alto
+#define MOSFET_NIVEL_ON       1
 
 #define PIN_ONEWIRE           GPIO_NUM_4
-#define CANAL_TURBIDEZ        ADC_CHANNEL_6
 #define NIVEL_VALOR_CON_AGUA  1
 // Para que el oleaje del agua no dispare un error de nivel
 #define NIVEL_ANTIRREBOTE_MS  500
@@ -29,10 +29,12 @@
 #define TEMP_SEGURIDAD_C      55.0f
 #define HISTERESIS_C          1.0f
 
-// Hay que calibrarlo con el sensor real: con agua limpia da más tensión
-#define TURBIDEZ_RAW_LIMPIA   3200
-#define TURBIDEZ_RAW_TURBIA   2000
-#define TURBIDEZ_MUESTRAS     16
+#define TURBIDEZ_CANAL_ADS    0     // AIN0
+#define TURBIDEZ_DIVISOR      1.5f  // divisor 10k/20k antes del ADS
+// Voltios del sensor, del datasheet. Hay que calibrarlo con el sensor real: con agua limpia da más tensión
+#define TURBIDEZ_V_LIMPIA     4.2f
+#define TURBIDEZ_V_TURBIA     2.5f
+#define TURBIDEZ_MUESTRAS     8
 #define UMBRAL_TURBIDEZ_PCT   60.0f
 
 #define PERIODO_FSM_MS        100
