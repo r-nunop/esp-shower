@@ -7,7 +7,7 @@ menu "S-PockShower"
         default ""
     config OTA_URL
         string "URL del firmware OTA"
-        default ""
+        default "https://github.com/r-nunop/esp-shower/releases/latest/download/S_PockShower.bin"
     config OTA_HORA_DIARIA
         int "Hora de la comprobacion diaria de OTA (hora de Madrid)"
         range 0 23

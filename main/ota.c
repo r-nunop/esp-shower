@@ -96,6 +96,7 @@ static void ota_task(void *arg)
         .url = CONFIG_OTA_URL,
         .crt_bundle_attach = esp_crt_bundle_attach,
         .keep_alive_enable = true,
+        .buffer_size_tx = 2048,
     };
     esp_https_ota_config_t ota_cfg = { .http_config = &http_cfg };
     esp_https_ota_handle_t handle = NULL;
