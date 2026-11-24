@@ -10,6 +10,7 @@ idf_component_register(
         "actuadores.c"
         "bus_i2c.c"
         "mcp23017.c"
+        "ads1115.c"
         "pantalla.c"
         "avisos.c"
         "seguridad.c"
