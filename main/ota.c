@@ -1,5 +1,7 @@
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include "esp_log.h"
 #include "esp_https_ota.h"
 #include "esp_ota_ops.h"
@@ -19,6 +21,7 @@ static volatile bool en_curso = false;
 static portMUX_TYPE mux = portMUX_INITIALIZER_UNLOCKED;
 
 #define PLAZO_VALIDAR_MS  (5 * 60 * 1000)
+#define TZ_MADRID         "CET-1CEST,M3.5.0,M10.5.0/3"
 
 static bool leer_version(const char *v, int n[3])
 {
@@ -186,6 +189,13 @@ static bool wifi_con_ip(void)
     return netif != NULL && esp_netif_get_ip_info(netif, &ip) == ESP_OK && ip.ip.addr != 0;
 }
 
+static bool hora_local(struct tm *local)
+{
+    time_t ahora = time(NULL);
+    localtime_r(&ahora, local);
+    return local->tm_year + 1900 >= 2025;
+}
+
 static void planificador_task(void *arg)
 {
     const esp_app_desc_t *app = esp_app_get_description();
@@ -196,6 +206,8 @@ static void planificador_task(void *arg)
     bool avisar = leer_instalada(instalada, sizeof(instalada));
     int64_t wifi_desde = -1;
     int64_t sin_wifi_desde = -1;
+    bool comprobada_al_arrancar = false;
+    int ultimo_dia = -1;
 
     for (;;) {
         int64_t t = ahora_ms();
@@ -226,12 +238,25 @@ static void planificador_task(void *arg)
             if (strcmp(instalada, app->version) == 0) {
                 enviar_estado("UPDATED", NULL);
             } else {
-                char error[64];
+                char error[80];
                 snprintf(error, sizeof(error), "Vuelta atras: la version %s no arranco bien", instalada);
                 enviar_estado("FAILED", error);
             }
             borrar_instalada();
             avisar = false;
+        }
+
+        bool se_puede = tb_conectado() && fsm_estado() == EST_REPOSO;
+        if (!comprobada_al_arrancar && se_puede && ota_lanzar()) {
+            ESP_LOGI(TAG, "Comprobacion al arrancar");
+            comprobada_al_arrancar = true;
+        }
+
+        struct tm local;
+        if (hora_local(&local) && local.tm_hour == CONFIG_OTA_HORA_DIARIA && local.tm_yday != ultimo_dia &&
+            se_puede && ota_lanzar()) {
+            ESP_LOGI(TAG, "Comprobacion diaria");
+            ultimo_dia = local.tm_yday;
         }
 
         vTaskDelay(pdMS_TO_TICKS(1000));
@@ -240,6 +265,8 @@ static void planificador_task(void *arg)
 
 void ota_init(void)
 {
+    setenv("TZ", TZ_MADRID, 1);
+    tzset();
     if (xTaskCreate(planificador_task, "ota_planif", 4096, NULL, 2, NULL) != pdPASS) {
         ESP_LOGE(TAG, "No se pudo crear ota_planif");
     }
