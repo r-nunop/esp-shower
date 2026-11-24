@@ -2,24 +2,26 @@
 #include "driver/gpio.h"
 #include "esp_adc/adc_oneshot.h"
 
-#define PIN_RELE_BOMBA        GPIO_NUM_26
-#define PIN_RELE_VALVULA      GPIO_NUM_27
+// Eduponics Mini
+#define PIN_RELE_BOMBA        GPIO_NUM_23
+#define BOMBA_NIVEL_ON        1
+#define PIN_NIVEL             GPIO_NUM_21
+#define PIN_LED               GPIO_NUM_14
 
-#define PIN_RELE_CALENTADOR   GPIO_NUM_17
-#define PIN_RELE_LIBRE        GPIO_NUM_25
-#define RELE_NIVEL_ACTIVO     0
-
-#define PIN_ONEWIRE           GPIO_NUM_4
-#define CANAL_TURBIDEZ        ADC_CHANNEL_6
-#define PIN_NIVEL             GPIO_NUM_35
-#define NIVEL_VALOR_CON_AGUA  1
-#define NIVEL_ANTIRREBOTE_MS  500 
-
+// Placa de extensión. IO12 arranca en bajo, así la placa está apagada durante el reset
 #define PIN_EXT_ALIM          GPIO_NUM_12
 #define PIN_I2C_SDA           GPIO_NUM_32
 #define PIN_I2C_SCL           GPIO_NUM_33
-#define PIN_BUZZER            GPIO_NUM_13
-#define PIN_LED               GPIO_NUM_33
+#define MCP_RELE_VALVULA      0     // relé 1 (GPA0)
+#define MCP_RELE_CALENTADOR   1     // relé 2 (GPA1), activa el IN del módulo de 30 A
+// Sin comprobar: probarlo con la placa antes de conectar el calentador
+#define RELE_EXT_NIVEL_ON     1
+
+#define PIN_ONEWIRE           GPIO_NUM_4
+#define CANAL_TURBIDEZ        ADC_CHANNEL_6
+#define NIVEL_VALOR_CON_AGUA  1
+// Para que el oleaje del agua no dispare un error de nivel
+#define NIVEL_ANTIRREBOTE_MS  500
 
 #define TEMP_OBJETIVO_DEFECTO 38.0f
 #define TEMP_MIN_C            20.0f
@@ -27,6 +29,7 @@
 #define TEMP_SEGURIDAD_C      55.0f
 #define HISTERESIS_C          1.0f
 
+// Hay que calibrarlo con el sensor real: con agua limpia da más tensión
 #define TURBIDEZ_RAW_LIMPIA   3200
 #define TURBIDEZ_RAW_TURBIA   2000
 #define TURBIDEZ_MUESTRAS     16

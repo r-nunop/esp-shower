@@ -214,6 +214,7 @@ static void fsm_task(void *arg)
 
         ejecutar_estado(&l);
         aplicar_actuadores();
+        if (!actuadores_ok() && estado != EST_ERROR) ir_a(EST_ERROR, ERR_ACTUADORES);
 
         pantalla_actualizar(estado, &l, t_obj, error_actual);
         avisos_update();
