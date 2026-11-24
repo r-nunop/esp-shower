@@ -8,6 +8,7 @@ idf_component_register(
         "sensor_turbidez.c"
         "sensor_nivel.c"
         "actuadores.c"
+        "bus_i2c.c"
         "pantalla.c"
         "avisos.c"
         "seguridad.c"
