@@ -4,22 +4,37 @@
 
 static const char *TAG = "MCP23017";
 
+// Banco 0: el registro del puerto B va justo después del de A
 #define REG_IODIRA   0x00
 #define REG_OLATA    0x14
 #define TIMEOUT_MS   50
 
 static i2c_master_dev_handle_t dev = NULL;
+static bool fallo = true;
+
+// Si el MCP no responde no sabemos cómo están los relés, así que se corta la extensión
+static void cortar_extension(void)
+{
+    bus_i2c_cortar_extension();
+    fallo = true;
+    ESP_LOGE(TAG, "Fallo en el MCP23017: extensión sin alimentación");
+}
 
 static esp_err_t escribir_reg(uint8_t reg, uint8_t valor)
 {
+    if (fallo) return ESP_ERR_INVALID_STATE;
+
     uint8_t buf[2] = { reg, valor };
-    return i2c_master_transmit(dev, buf, sizeof(buf), TIMEOUT_MS);
+    // Un reintento por si ha sido ruido puntual en el bus
+    esp_err_t ret = i2c_master_transmit(dev, buf, sizeof(buf), TIMEOUT_MS);
+    if (ret != ESP_OK) ret = i2c_master_transmit(dev, buf, sizeof(buf), TIMEOUT_MS);
+    if (ret != ESP_OK) cortar_extension();
+    return ret;
 }
 
-// salidas_a: bit a 1 = pin de salida. El resto se queda como entrada.
-esp_err_t mcp23017_init(uint8_t olat_a, uint8_t salidas_a)
+esp_err_t mcp23017_init(void)
 {
-    if (dev != NULL) return ESP_OK;
+    if (dev != NULL) return fallo ? ESP_ERR_INVALID_STATE : ESP_OK;
 
     i2c_master_bus_handle_t bus = bus_i2c_handle();
     if (bus == NULL) return ESP_ERR_INVALID_STATE;
@@ -35,6 +50,7 @@ esp_err_t mcp23017_init(uint8_t olat_a, uint8_t salidas_a)
     }
     if (dir == 0) {
         ESP_LOGE(TAG, "No encontrado en 0x27 ni en 0x20");
+        cortar_extension();
         return ESP_ERR_NOT_FOUND;
     }
     ESP_LOGI(TAG, "Encontrado en 0x%02x", dir);
@@ -45,20 +61,30 @@ esp_err_t mcp23017_init(uint8_t olat_a, uint8_t salidas_a)
         .scl_speed_hz = 100000,
     };
     esp_err_t ret = i2c_master_bus_add_device(bus, &cfg, &dev);
-    if (ret != ESP_OK) return ret;
-
-    // Primero el valor y luego la dirección, para que al pasar a salida ya esté apagado
-    ret = escribir_reg(REG_OLATA, olat_a);
-    if (ret == ESP_OK) ret = escribir_reg(REG_IODIRA, (uint8_t)~salidas_a);
     if (ret != ESP_OK) {
-        i2c_master_bus_rm_device(dev);
         dev = NULL;
+        cortar_extension();
+        return ret;
     }
+    fallo = false;
+    return ESP_OK;
+}
+
+// salidas: bit a 1 = pin de salida. El resto se queda como entrada.
+esp_err_t mcp23017_configurar(mcp_puerto_t puerto, uint8_t olat, uint8_t salidas)
+{
+    // Primero el valor y luego la dirección, para que al pasar a salida ya esté apagado
+    esp_err_t ret = escribir_reg(REG_OLATA + puerto, olat);
+    if (ret == ESP_OK) ret = escribir_reg(REG_IODIRA + puerto, (uint8_t)~salidas);
     return ret;
 }
 
-esp_err_t mcp23017_escribir_a(uint8_t olat_a)
+esp_err_t mcp23017_escribir(mcp_puerto_t puerto, uint8_t olat)
 {
-    if (dev == NULL) return ESP_ERR_INVALID_STATE;
-    return escribir_reg(REG_OLATA, olat_a);
+    return escribir_reg(REG_OLATA + puerto, olat);
+}
+
+bool mcp23017_ok(void)
+{
+    return !fallo;
 }

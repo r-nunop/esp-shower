@@ -3,35 +3,20 @@
 #include "bus_i2c.h"
 #include "mcp23017.h"
 #include "driver/gpio.h"
-#include "esp_log.h"
-
-static const char *TAG = "ACTUADORES";
 
 // Los 4 relés de la extensión (GPA0-GPA3) como salidas, también los que no se usan
 #define MASCARA_RELES   0x0F
 #define OLAT_APAGADO    (RELE_EXT_NIVEL_ON ? 0x00 : MASCARA_RELES)
 
 static uint8_t olat = OLAT_APAGADO;
-static bool fallo = true;
-
-static void cortar_extension(void)
-{
-    bus_i2c_cortar_extension();
-    fallo = true;
-    ESP_LOGE(TAG, "Fallo en el MCP23017: extensión sin alimentación");
-}
 
 static void rele_ext(int n, bool on)
 {
-    if (fallo) return;
-
     bool nivel = on ? RELE_EXT_NIVEL_ON : !RELE_EXT_NIVEL_ON;
     uint8_t nuevo = nivel ? (olat | (1 << n)) : (olat & ~(1 << n));
     if (nuevo == olat) return;
 
-    // Un reintento por si ha sido ruido puntual en el bus
-    if (mcp23017_escribir_a(nuevo) == ESP_OK || mcp23017_escribir_a(nuevo) == ESP_OK) olat = nuevo;
-    else cortar_extension();
+    if (mcp23017_escribir(MCP_PUERTO_A, nuevo) == ESP_OK) olat = nuevo;
 }
 
 void actuadores_init(void)
@@ -47,16 +32,14 @@ void actuadores_init(void)
     gpio_config(&io);
     gpio_set_level(PIN_RELE_BOMBA, !BOMBA_NIVEL_ON);
 
-    if (bus_i2c_init() == ESP_OK && mcp23017_init(OLAT_APAGADO, MASCARA_RELES) == ESP_OK) {
-        fallo = false;
-    } else {
-        cortar_extension();
+    if (bus_i2c_init() == ESP_OK && mcp23017_init() == ESP_OK) {
+        mcp23017_configurar(MCP_PUERTO_A, OLAT_APAGADO, MASCARA_RELES);
     }
 }
 
 bool actuadores_ok(void)
 {
-    return !fallo;
+    return mcp23017_ok();
 }
 
 void actuadores_bomba(bool on)
