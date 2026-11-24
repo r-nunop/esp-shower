@@ -15,8 +15,9 @@
 #define NIVEL_VALOR_CON_AGUA  1
 #define NIVEL_ANTIRREBOTE_MS  500 
 
-#define PIN_I2C_SDA           GPIO_NUM_21
-#define PIN_I2C_SCL           GPIO_NUM_22
+#define PIN_EXT_ALIM          GPIO_NUM_12
+#define PIN_I2C_SDA           GPIO_NUM_32
+#define PIN_I2C_SCL           GPIO_NUM_33
 #define PIN_BUZZER            GPIO_NUM_13
 #define PIN_LED               GPIO_NUM_33
 
